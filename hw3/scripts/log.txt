@@ -1,0 +1,58 @@
+## PART 1 ##
+
+#create group mask
+3dmask_tool -input masks/full_mask.sub-*+tlrc.HEAD -frac 1.0 -prefix mask
+
+#compute ttest on word contrast
+3dttest++ -mask mask+tlrc -prefix word -setA 'betas/stats.sub*+tlrc.HEAD[10]'
+
+## PART 2 ##
+
+#extract the relevant row
+for f in blurs/blur_est.sub-*.1D;
+	do
+	1d_tool.py -infile $f -select_rows 5 -write - >> blurs.acf.1D
+done
+
+#avg of the blurs
+1dsum -mean blurs.acf.1D
+
+#use 3dclustsim
+3dClustSim -mask mask+tlrc -acf 0.823891 4.19962 14.369 -both -pthr .05 .01 .001 -athr .1 .05 .025 .01 -iter 2000 -prefix cluster -cmd refit.cmd
+
+#attach to stats
+`cat refit.cmd` word+tlrc
+
+#make masked stats file
+3dcalc -a word+tlrc -b mask+tlrc -expr 'a*b' -prefix word_masked
+
+3dmerge -1zscore -prefix wordz 'word_masked+tlrc[1]'
+
+#make cluster table
+3dclust -1Dformat -nosum -prefix wordz_clustered -savemask cluster_mask -inmask -1noneg -1clip 3 -dxyz=1 1.74 21 wordz+tlrc >> cluster_table.1D
+
+## PART 3 ##
+
+#add FDR values to stat file
+3drefit -addFDR -FDRmask mask+tlrc word+tlrc
+
+3dFDR -input word+tlrc'[1]' -mask mask+tlrc -prefix wordz_FDR
+
+#make cluster table for FDR
+3dclust -1Dformat -nosum -prefix wordz_clustered_FDR -savemask cluster_mask_FDR -inmask -1noneg -1clip 3 -dxyz=1 1.74 1 wordz_FDR+tlrc >> FDR_table.1D
+
+#grab peak activation coordinates from cluster table
+while read line; do 
+	clust=`echo "$line" | awk '{print $1 " " $13 " " $14 " " $15 " " $16}'`
+	echo $clust >> cluster_peaks_table.1D
+done << WORD_CLUST
+`cat cluster_table.1D | tail -n +13`
+WORD_CLUST
+
+#grab peak activation coordinates from FDR table
+while read line; do 
+	clust=`echo "$line" | awk '{print $1 " " $13 " " $14 " " $15 " " $16}'`
+	echo $clust >> FDR_peaks_table.1D
+done << WORD_FDR
+`cat FDR_table.1D | tail -n +13`
+WORD_FDR
